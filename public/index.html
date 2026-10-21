@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>에이전트 사무실</title>
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside id="floors">
+  <div class="fhead"><span>🏢 층별 안내</span><small>FLOOR GUIDE</small></div>
+  <div id="floorList"></div>
+  <button id="moreFloors" class="more"></button>
+</aside>
+
+<main id="stage">
+  <canvas id="cv"></canvas>
+  <div id="overlay"></div>
+  <div class="scard">
+    <div class="slogo">✳</div>
+    <div class="sm">
+      <div class="sr"><span id="cardFloor" class="cfno">–</span><b id="cardProject">에이전트 사무실</b></div>
+      <div id="cardTitle" class="stitle"></div>
+    </div>
+  </div>
+  <div id="live" class="live off">● 연결 중</div>
+  <button id="toggleFloors" class="ptoggle"></button>
+  <button id="toggleSide" class="ptoggle"></button>
+  <div class="zoom">
+    <button id="zoomIn" title="확대">+</button>
+    <button id="zoomOut" title="축소">−</button>
+    <button id="zoomReset" title="원위치">⟲</button>
+  </div>
+  <div class="help">🪙 토큰 0 · 세션 파일만 읽음 &nbsp;·&nbsp; 드래그로 이동 · 휠로 확대 · 더블클릭으로 원위치</div>
+</main>
+
+<aside id="side">
+  <section class="card proj">
+    <div class="kv"><label>프로젝트</label><code id="projPath">—</code></div>
+    <div class="kv"><label>세션</label><code id="sessId">—</code></div>
+  </section>
+  <section class="card">
+    <h4>사무실 사람들 <small id="peopleCount"></small></h4>
+    <div id="people"></div>
+  </section>
+  <section class="card grow">
+    <h4>활동 로그</h4>
+    <ol id="log"></ol>
+  </section>
+  <section class="card">
+    <h4>어디서 무엇을 하나</h4>
+    <div class="legend">
+      <div>📚 <b>자료실</b> 파일 읽기 · 검색</div>
+      <div>💻 <b>개발실</b> 코드 작성 · 수정</div>
+      <div>🗄️ <b>서버실</b> 명령 실행 · git</div>
+      <div>🌐 <b>정보검색실</b> 웹 · 외부 도구</div>
+      <div>📋 <b>회의실</b> 계획 · 할 일 · 위임</div>
+      <div>🙋 <b>내 자리</b> 질문 · 보고</div>
+      <div class="wide">🛗 <b>엘리베이터</b> 서브에이전트 출퇴근</div>
+    </div>
+  </section>
+</aside>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

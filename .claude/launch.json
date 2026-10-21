@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agentoffice",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server.js"
+      ],
+      "port": 4777
+    },
+    {
+      "name": "agentoffice-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "demo.js",
+        "--serve"
+      ],
+      "port": 4778
+    }
+  ]
+}

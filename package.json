@@ -1,0 +1,74 @@
+{
+  "name": "agentoffice",
+  "version": "1.0.0",
+  "description": "Claude Code 세션 파일을 대본 삼아 아이소메트릭 사무실에서 캐릭터가 연기하는 뷰어 (토큰 0)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node demo.js --serve",
+    "app": "electron .",
+    "icons": "node scripts/make-icons.js",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "productName": "AgentOffice",
+  "author": "bibaram",
+  "devDependencies": {
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.agentoffice.app",
+    "productName": "AgentOffice",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "server.js",
+      "lib/**",
+      "public/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "에이전트 사무실",
+      "uninstallDisplayName": "에이전트 사무실",
+      "artifactName": "AgentOffice-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "AgentOffice-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    }
+  }
+}
