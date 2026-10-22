@@ -230,7 +230,6 @@ let floors = [], showAllFloors = false, current = null, es = null, info = {};
 let sel = { floor: null, session: null, follow: true };
 try { Object.assign(sel, JSON.parse(localStorage.getItem('agentoffice.sel') || '{}')); } catch {}
 const saveSel = () => { try { localStorage.setItem('agentoffice.sel', JSON.stringify(sel)); } catch {} };
-const ACTIVE_MS = 90 * 1000;
 function ago(ms) { const s = (Date.now() - ms) / 1000; return s < 60 ? '방금' : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; }
 const hashStr = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 
@@ -261,31 +260,48 @@ setInterval(renderBuilding, 400);
 
 function floorNumbering(list) { return new Map(list.map((f) => [f.key, (f.name || '?').trim().slice(0, 1).toUpperCase()])); }
 
+// 2층(Claude·서브에이전트) / 1층(백그라운드) 중 어디서 일하는지 작은 배지로
+function workBadges(w, f2Count) {
+  if (!w) return '';
+  const f2 = typeof w.f2 === 'number' ? w.f2 : w.f2 ? 1 : 0;
+  return (f2 ? `<span class="wb f2" title="2층 사무실에서 작업 중">2F${f2Count && f2 > 1 ? ' ' + f2 : ''}</span>` : '') +
+    (w.f1 ? `<span class="wb f1" title="1층 작업실 백그라운드 작업">1F 🤖${w.f1}</span>` : '');
+}
+
 function renderFloors() {
-  const recent = floors.slice(0, 4);
+  // 지금 일하는 프로젝트(2층·1층 하나라도)는 전부, 나머지는 최근 순으로 채워 4개까지
+  const working = floors.filter((f) => f.working);
+  const recent = working.concat(floors.filter((f) => !f.working).slice(0, Math.max(0, 4 - working.length)));
   const cur = floors.find((f) => f.key === sel.floor);
   if (cur && !recent.includes(cur)) recent.push(cur);
   const shown = showAllFloors ? floors : recent;
   const nums = floorNumbering(shown);
   const now = Date.now();
+  let lastGroup = null;
   const html = shown.map((f) => {
     const [bg, fg] = FLOOR_COLORS[hashStr(f.key) % FLOOR_COLORS.length];
-    const live = now - f.mtime < ACTIVE_MS;
+    const live = f.working;
     const open = f.key === sel.floor;
+    const group = f.working ? 'work' : 'rest';
+    let head = '';
+    if (group !== lastGroup) {
+      head = group === 'work' ? `<div class="fgroup on">● 진행 중 <b>${working.length}</b></div>` : (working.length ? '<div class="fgroup">최근</div>' : '');
+      lastGroup = group;
+    }
     let body = '';
     if (open) {
-      body = `<div class="fbody"><label class="follow"><input type="checkbox" ${sel.follow ? 'checked' : ''} data-follow> 🔄 최근 세션 자동으로 따라가기</label><div class="slist">` +
+      body = `<div class="fbody"><label class="follow"><input type="checkbox" ${sel.follow ? 'checked' : ''} data-follow> 🔄 진행 중·최근 세션 자동으로 따라가기</label><div class="slist">` +
         f.sessions.map((s) => {
           const isCur = s.session === current;
-          const act = now - s.mtime < ACTIVE_MS;
-          return `<div class="sitem ${isCur ? 'cur' : ''}" data-session="${esc(s.session)}" title="${esc(s.title)}"><span class="st">${isCur ? '📌 ' : ''}${esc(s.title)}</span><span class="sa ${act ? 'on' : ''}">${act && isCur ? '지금 활동 중' : act ? '활동 중' : ago(s.mtime)}</span></div>`;
+          return `<div class="sitem ${isCur ? 'cur' : ''} ${s.work ? 'busy' : ''}" data-session="${esc(s.session)}" title="${esc(s.title)}"><span class="st">${isCur ? '📌 ' : ''}${esc(s.title)}</span>${s.work ? `<span class="wbs">${workBadges(s.work)}</span>` : `<span class="sa">${ago(s.mtime)}</span>`}</div>`;
         }).join('') + '</div></div>';
     }
-    return `<div class="floor ${open ? 'open' : ''}" data-floor="${esc(f.key)}">
+    return `${head}<div class="floor ${open ? 'open' : ''} ${live ? 'working' : ''}" data-floor="${esc(f.key)}">
       <div class="fhead2"><span class="fno" style="background:${bg};color:${fg}">${esc(nums.get(f.key))}</span>
-      <div class="fm"><b title="${esc(f.cwd)}">${esc(f.name)}</b><small>세션 ${f.count}개 · ${live ? '지금 활동 중' : ago(f.mtime)}</small></div>
+      <div class="fm"><b title="${esc(f.cwd)}">${esc(f.name)}</b><small>세션 ${f.count}개 · ${live ? '지금 작업 중' : ago(f.mtime)}</small>${live ? `<span class="wbs">${workBadges(f.work, true)}</span>` : ''}</div>
       <span class="fdot ${live ? 'on' : ''}"></span></div>${body}</div>`;
   }).join('');
+  void now;
   const el = $('floorList');
   if (el._html !== html) {
     const sl = el.querySelector('.slist'); const scroll = sl ? sl.scrollTop : 0;
@@ -324,10 +340,12 @@ async function refreshFloors() {
   if (!f) { f = floors[0]; sel = { floor: f.key, session: null, follow: true }; saveSel(); }
   let target;
   if (sel.follow) {
-    target = f.sessions[0].session;
+    // 목록은 일하는 세션이 먼저 오므로 맨 위가 따라갈 세션
+    const top = f.sessions[0];
+    target = top.session;
     const cur = f.sessions.find((s) => s.session === current);
-    // 지금 보는 세션이 아직 살아 있으면 성급히 갈아타지 않음
-    if (cur && target !== current && f.sessions[0].mtime - cur.mtime < 15000) target = current;
+    // 지금 보는 세션도 일하는 중이거나, 둘 다 쉬는데 차이가 작으면 성급히 갈아타지 않음
+    if (cur && target !== current && (cur.work || (!top.work && top.mtime - cur.mtime < 15000))) target = current;
   } else target = sel.session && f.sessions.some((s) => s.session === sel.session) ? sel.session : f.sessions[0].session;
   if (target !== current) connect(target);
   renderFloors();

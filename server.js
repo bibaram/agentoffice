@@ -60,7 +60,10 @@ function lastLine(file) {
     const len = Math.min(size, 4096), b = Buffer.alloc(len);
     const fd = fs.openSync(file, 'r');
     try { fs.readSync(fd, b, 0, len, size - len); } finally { fs.closeSync(fd); }
-    const lines = b.toString('utf8').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean);
+    // Windows 프로그램은 한글을 CP949(euc-kr)로 쓰는 경우가 많다: UTF-8로 깨지면 그걸로 다시 읽기
+    let text = b.toString('utf8');
+    if (text.includes('�')) { try { const k = new TextDecoder('euc-kr').decode(b); if (!k.includes('�')) text = k; } catch {} }
+    const lines = text.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean);
     return clip(lines[lines.length - 1] || '', 90);
   } catch { return ''; }
 }
@@ -278,6 +281,50 @@ function listSessions(limit = 40) {
 }
 
 // 프로젝트 = 층. 프로젝트마다 세션 목록을 묶어 준다
+// ---------- 세션이 지금 일하는 중인지 (2층: Claude·서브에이전트 / 1층: 백그라운드) ----------
+const FG_KINDS = new Set(['user_say', 'think', 'say', 'tool_start', 'question', 'tool_end', 'turn_end', 'interrupt']);
+const statusCache = new Map(); // file → 세션 파일 끝을 분류한 결과 (파일이 바뀔 때만 다시 계산)
+function sessionStatus(file, st) {
+  const now = Date.now();
+  if (now - st.mtimeMs > 24 * 3600000) return null; // 하루 넘게 조용한 세션은 쉬는 중
+  let c = statusCache.get(file);
+  if (!c || c.mtime !== st.mtimeMs) {
+    const cls = new Classifier('main'), jobs = new Map();
+    let last = null;
+    for (const l of new FileTail(file).readTail(512 * 1024)) {
+      const r = parse(l);
+      if (!r) continue;
+      for (const e of cls.classify(r)) {
+        if (FG_KINDS.has(e.kind)) last = e.kind;
+        if (e.kind === 'bg_start') jobs.set(e.toolId, { ts: e.ts, kind: e.bgKind });
+        else if (e.kind === 'bg_info') { const j = jobs.get(e.toolId); if (j) { j.file = e.outputFile; j.taskId = e.taskId; } }
+        else if (e.kind === 'bg_end') for (const [k, j] of jobs) if (k === e.toolId || (e.taskId && j.taskId === e.taskId)) jobs.delete(k);
+      }
+    }
+    c = { mtime: st.mtimeMs, last, jobs: [...jobs.values()] };
+    statusCache.set(file, c);
+  }
+  // 서브에이전트 기록이 최근 2분 안에 바뀌었으면 일하는 중
+  let agents = 0;
+  try {
+    const dir = path.join(path.dirname(file), path.basename(file, '.jsonl'), 'subagents');
+    for (const n of fs.readdirSync(dir)) if (n.endsWith('.jsonl') && now - fs.statSync(path.join(dir, n)).mtimeMs < 120000) agents++;
+  } catch {}
+  // 1층: 끝 알림이 아직 없는 백그라운드 작업. 출력 파일이 15분 넘게 그대로면 이미 멈춘 것으로 본다
+  let bgShell = 0, bgAgent = 0;
+  for (const j of c.jobs) {
+    if (now - j.ts > 12 * 3600000) continue;
+    if (j.kind === 'agent') { if (agents > 0 || now - j.ts < 10 * 60000) bgAgent++; continue; }
+    let alive = now - j.ts < 15 * 60000;
+    if (j.file) { try { alive = alive || now - fs.statSync(j.file).mtimeMs < 15 * 60000; } catch { alive = false; } }
+    if (alive) bgShell++;
+  }
+  // 2층: 턴이 아직 안 끝났고 최근 10분 안에 기록이 있음, 또는 (백그라운드가 아닌) 서브에이전트가 일하는 중
+  const f2 = (!!c.last && c.last !== 'turn_end' && c.last !== 'interrupt' && now - st.mtimeMs < 10 * 60000) || agents > bgAgent;
+  const f1 = bgShell + bgAgent;
+  return f2 || f1 ? { f2, f1 } : null;
+}
+
 function listFloors(perFloor = 30) {
   const floors = [];
   let dirs = [];
@@ -293,11 +340,15 @@ function listFloors(perFloor = 30) {
     } catch {}
     if (!files.length) continue;
     files.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs);
-    const sessions = files.slice(0, perFloor).map(({ file, st }) => sessionInfo(file, st));
+    const sessions = files.slice(0, perFloor).map(({ file, st }) => Object.assign({}, sessionInfo(file, st), { work: sessionStatus(file, st) }));
+    // 일하는 세션이 위로
+    sessions.sort((a, b) => (!!b.work - !!a.work) || b.mtime - a.mtime);
     const cwd = (sessions.find((x) => x.cwd) || {}).cwd || '';
-    floors.push({ key: d.name, name: cwd ? path.basename(cwd) : d.name, cwd, count: files.length, mtime: files[0].st.mtimeMs, sessions });
+    const work = { f2: sessions.filter((s) => s.work && s.work.f2).length, f1: sessions.reduce((n, s) => n + (s.work ? s.work.f1 : 0), 0) };
+    floors.push({ key: d.name, name: cwd ? path.basename(cwd) : d.name, cwd, count: files.length, mtime: files[0].st.mtimeMs, sessions, work, working: work.f2 + work.f1 > 0 });
   }
-  floors.sort((a, b) => b.mtime - a.mtime);
+  // 지금 일하는 프로젝트(2층·1층 어디든)가 먼저, 그다음 최근 순
+  floors.sort((a, b) => (b.working - a.working) || b.mtime - a.mtime);
   return floors;
 }
 

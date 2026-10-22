@@ -221,3 +221,17 @@ body.mini .ftabs { top: 8px; padding: 2px; }
 body.mini .ftabs button { padding: 3px 8px; font-size: 11px; }
 body.mini .ftabs .cnt { display: none; }
 @media (max-width: 1200px) { .ftabs { top: 70px; } }
+
+/* ---------- 프로젝트 목록: 진행 중 먼저 ---------- */
+.fgroup { padding: 6px 6px 0; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .02em; }
+.fgroup.on { color: var(--green); }
+.fgroup b { font-weight: 800; }
+.floor.working { border-color: #bfe8cf; }
+.floor.working.open { border-color: #f0a050; }
+.floor.working .fdot.on { animation: ping 1.4s infinite; }
+.wbs { display: flex; gap: 4px; margin-top: 3px; flex: none; }
+.sitem .wbs { margin-top: 0; }
+.wb { font-size: 9.5px; font-weight: 800; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+.wb.f2 { background: #e2ecff; color: #2c64c4; }
+.wb.f1 { background: #fff1c9; color: #8a6a10; }
+.sitem.busy .st { font-weight: 700; }

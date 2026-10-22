@@ -47,7 +47,7 @@ npm run demo     # → http://localhost:4778
 
 ### 설치
 
-`dist/AgentOffice-Setup-1.1.0.exe`를 실행합니다. 설치 없이 쓰려면 `dist/AgentOffice-Portable-1.1.0.exe`를 실행하세요.
+`dist/AgentOffice-Setup-1.1.1.exe`를 실행합니다. 설치 없이 쓰려면 `dist/AgentOffice-Portable-1.1.1.exe`를 실행하세요.
 
 서명하지 않은 exe라서 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
 
