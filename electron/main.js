@@ -18,7 +18,7 @@ app.setAppUserModelId('com.agentoffice.app'); // Windows 알림에 필요
 
 // ---------- 설정 ----------
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-let settings = { notifyAsk: true, notifyDone: true, notifyAgent: true, mini: false, bounds: null, trayHintShown: false };
+let settings = { notifyAsk: true, notifyDone: true, notifyAgent: true, notifyBg: true, mini: false, bounds: null, trayHintShown: false };
 function loadSettings() { try { Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))); } catch {} }
 let saveTimer = null;
 function saveSettings() {
@@ -120,6 +120,7 @@ function buildMenu() {
       { label: 'Claude가 질문할 때', type: 'checkbox', checked: settings.notifyAsk, click: toggle('notifyAsk') },
       { label: 'Claude가 답을 마쳤을 때', type: 'checkbox', checked: settings.notifyDone, click: toggle('notifyDone') },
       { label: '서브에이전트 일 끝남', type: 'checkbox', checked: settings.notifyAgent, click: toggle('notifyAgent') },
+      { label: '1층 백그라운드 작업 끝남', type: 'checkbox', checked: settings.notifyBg, click: toggle('notifyBg') },
       { type: 'separator' },
       { label: '알림 테스트 보내기', click: () => notify('🔔 알림 테스트', '이 알림이 보이면 정상입니다. Claude가 질문하거나 일을 마치면 이렇게 알려 드려요.') },
     ] },
@@ -176,6 +177,12 @@ bus.on('global', (e, src) => {
       }
       break;
     case 'interrupt': s.askToolId = null; setMode(s, 'idle'); break;
+    case 'bg_end': // 1층 작업실: 백그라운드 셸 작업 · 백그라운드 서브에이전트가 끝남
+      if (settings.notifyBg && !userLooking(src)) {
+        const head = { completed: '✅ 백그라운드 작업 완료', failed: '❌ 백그라운드 작업 실패' }[e.status] || '⏹ 백그라운드 작업 중지';
+        notify(head, where + (e.summary || ''));
+      }
+      break;
     case 'turn_end': {
       if (s.mode === 'idle') break; // stop_hook 과 end_turn 이 둘 다 오므로 한 번만
       const worked = Date.now() - s.turnStart;

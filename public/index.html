@@ -9,7 +9,7 @@
 </head>
 <body>
 <aside id="floors">
-  <div class="fhead"><span>🏢 층별 안내</span><small>FLOOR GUIDE</small></div>
+  <div class="fhead"><span>🗂️ 프로젝트</span><small>PROJECTS</small></div>
   <div id="floorList"></div>
   <button id="moreFloors" class="more"></button>
 </aside>
@@ -25,6 +25,16 @@
     </div>
   </div>
   <div id="live" class="live off">● 연결 중</div>
+  <div class="ftabs">
+    <button data-goto="2F"><b>2F</b> 사무실 <span class="cnt"></span></button>
+    <button data-goto="1F"><b>1F</b> 작업실 <span class="cnt"></span><i class="ping"></i></button>
+  </div>
+  <div class="building" title="층을 눌러 이동">
+    <div class="roof"></div>
+    <div class="bfl" data-goto="2F"><b>2F</b><span>사무실</span><em class="cnt"></em><i class="win"></i></div>
+    <div class="bfl" data-goto="1F"><b>1F</b><span>작업실</span><em class="cnt"></em><i class="win"></i></div>
+    <div class="ground"></div>
+  </div>
   <button id="toggleFloors" class="ptoggle"></button>
   <button id="toggleSide" class="ptoggle"></button>
   <div class="zoom">
@@ -56,8 +66,9 @@
       <div>🗄️ <b>서버실</b> 명령 실행 · git</div>
       <div>🌐 <b>정보검색실</b> 웹 · 외부 도구</div>
       <div>📋 <b>회의실</b> 계획 · 할 일 · 위임</div>
-      <div>🙋 <b>내 자리</b> 질문 · 보고</div>
+      <div>👑 <b>사장실</b> 업무 지시 · 질문 · 보고</div>
       <div class="wide">🛗 <b>엘리베이터</b> 서브에이전트 출퇴근</div>
+      <div class="wide">🤖 <b>1F 작업실</b> 백그라운드 작업 · 백그라운드 서브에이전트</div>
     </div>
   </section>
 </aside>

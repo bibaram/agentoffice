@@ -11,7 +11,9 @@ const PROJ = path.join(ROOT, 'D--demo-project');
 const SID = 'demo-session-0001';
 const FILE = path.join(PROJ, SID + '.jsonl');
 const SUB = path.join(PROJ, SID, 'subagents');
+const TASKS = path.join(ROOT, 'tasks');
 fs.mkdirSync(SUB, { recursive: true });
+fs.mkdirSync(TASKS, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0;
@@ -31,12 +33,47 @@ async function tool(file, name, input, ms, result = 'ok', isError = false) {
   return tid;
 }
 
-async function subagent(agentId, type, desc, steps) {
+async function subagent(agentId, type, desc, steps, toolUseId) {
   const f = path.join(SUB, `agent-${agentId}${Date.now().toString(36)}.jsonl`); // 회차마다 새 파일 = 새 출근
-  fs.writeFileSync(f.replace(/\.jsonl$/, '.meta.json'), JSON.stringify({ agentType: type, description: desc }));
+  fs.writeFileSync(f.replace(/\.jsonl$/, '.meta.json'), JSON.stringify({ agentType: type, description: desc, toolUseId }));
   write(f, { type: 'user', isSidechain: true, message: { role: 'user', content: desc } });
   await sleep(1800);
   for (const s of steps) { await s(f); await sleep(500); }
+}
+
+// 백그라운드 작업 끝 알림 (Claude Code가 남기는 형식 그대로)
+const taskNote = (taskId, toolUseId, out, status, summary) => write(FILE, {
+  type: 'user', origin: { kind: 'task-notification' },
+  message: { role: 'user', content: `<task-notification>\n<task-id>${taskId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<output-file>${out}</output-file>\n<status>${status}</status>\n<summary>${summary}</summary>\n</task-notification>` },
+});
+
+// 백그라운드 셸 작업: 출력 파일에 한 줄씩 쓰다가 끝나면 알림
+async function bgShell(desc, command, lines, every, ok = true) {
+  const tid = id(), task = 'b' + Math.random().toString(36).slice(2, 10);
+  const out = path.join(TASKS, task + '.output');
+  asst(FILE, [{ type: 'tool_use', id: tid, name: 'Bash', input: { command, description: desc, run_in_background: true } }]);
+  await sleep(400);
+  write(FILE, {
+    type: 'user', toolUseResult: { backgroundTaskId: task },
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: `Command running in background with ID: ${task}. Output is being written to: ${out}` }] },
+  });
+  (async () => {
+    for (const l of lines) { fs.appendFileSync(out, l + '\n'); await sleep(every); }
+    taskNote(task, tid, out, ok ? 'completed' : 'failed', `Background command "${desc}" ${ok ? 'completed (exit code 0)' : 'failed with exit code 1'}`);
+  })();
+}
+
+// 백그라운드 서브에이전트: 1층으로 출근
+async function bgAgent(type, desc, steps) {
+  const tid = id();
+  asst(FILE, [{ type: 'tool_use', id: tid, name: 'Agent', input: { description: desc, subagent_type: type, prompt: '...', run_in_background: true } }]);
+  await sleep(300);
+  write(FILE, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: 'Async agent launched successfully.' }] } });
+  (async () => {
+    await subagent('demobg', type, desc, steps, tid);
+    await sleep(2500);
+    taskNote('demobg', tid, '', 'completed', `Agent "${desc}" finished`);
+  })();
 }
 
 async function scene() {
@@ -52,6 +89,22 @@ async function scene() {
   await tool(FILE, 'Grep', { pattern: 'sessionStore' }, 2000);
   await sleep(1000);
   await tool(FILE, 'TodoWrite', { todos: [] }, 1800);
+  await sleep(800);
+
+  // 오래 걸리는 일은 백그라운드로 → 1층 작업실
+  await bgShell('전체 테스트 스위트 실행', 'npm test -- --runInBand', [
+    '> jest --runInBand', 'PASS  src/auth/login.test.js', 'PASS  src/auth/refresh.test.js', 'RUNS  src/store/session.test.js',
+    'PASS  src/store/session.test.js', 'PASS  src/api/users.test.js', 'RUNS  src/api/orders.test.js', 'PASS  src/api/orders.test.js',
+    'Tests: 128 passed, 128 total', 'Time: 31.4 s',
+  ], 3000);
+  await sleep(800);
+  await bgAgent('general-purpose', '의존성 보안 점검', [
+    (f) => tool(f, 'Read', { file_path: 'package-lock.json' }, 2500),
+    (f) => tool(f, 'Bash', { command: 'npm audit --json', description: '보안 취약점 검사' }, 3500),
+    (f) => tool(f, 'WebSearch', { query: 'jsonwebtoken 9.0 CVE' }, 3000),
+    (f) => tool(f, 'Write', { file_path: 'SECURITY-REPORT.md' }, 2000),
+    async (f) => { say(f, '취약점 2건(중간) 발견, jsonwebtoken 9.0.2로 올리면 해결됩니다. SECURITY-REPORT.md 참고.', 'end_turn'); },
+  ]);
   await sleep(800);
 
   // 서브에이전트 둘에게 일 맡기기
@@ -80,6 +133,8 @@ async function scene() {
 
   think(FILE, '');
   await sleep(500);
+  await bgShell('린트 검사', 'npm run lint', ['> eslint src', 'src/store/session.js', '  42:7  error  no-unused-vars', '✖ 1 problem (1 error)'], 2000, false);
+  await sleep(600);
   await tool(FILE, 'Bash', { command: 'npm test auth', description: '인증 테스트 실행' }, 3500, 'Exit code 1\n2 failing: session expired', true);
   await sleep(1500);
   await tool(FILE, 'Edit', { file_path: 'src/store/session.js' }, 2500);
@@ -117,6 +172,7 @@ if (process.argv.includes('--serve')) { // npm run demo: 서버까지 같이 (�
   console.log('🎬 데모 세션 기록 중 →', FILE);
   for (;;) {
     for (const f of fs.readdirSync(SUB)) fs.rmSync(path.join(SUB, f));
+    for (const f of fs.readdirSync(TASKS)) fs.rmSync(path.join(TASKS, f));
     await scene();
     await sleep(12000);
   }

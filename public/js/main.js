@@ -1,7 +1,7 @@
-// 메인: 렌더 루프, 카메라(이동·확대), 층별 안내, 사람들·활동 로그, 서버 연결
+// 메인: 렌더 루프, 층 전환(2F 사무실 · 1F 작업실), 카메라, 프로젝트 목록, 사람들·활동 로그, 서버 연결
 import { iso, setCtx } from './iso.js';
-import { W, H, WALLH, FURN, ROOMS, drawFloor, drawBackWalls, staticItems, elevator, roomAt } from './world.js';
-import { actors, claude, me, drawActor, resetCast, renameMe, direct, setReplay, afterReplay, tickDirector, bubbleFor, statusOf, typeKo, fmtSec } from './actors.js';
+import { WALLH, FLOORS, boardState } from './world.js';
+import { actors, drawActor, resetCast, renameMe, direct, setReplay, afterReplay, tickDirector, bubbleFor, statusOf, typeKo, fmtSec, boardJobs } from './actors.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -11,10 +11,28 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 // ======================================================================
 // 카메라
 // ======================================================================
-const B = { minX: iso(0, H)[0], maxX: iso(W, 0)[0], minY: -WALLH - 30, maxY: iso(W, H)[1] + 26 };
-const WC = { x: (B.minX + B.maxX) / 2, y: (B.minY + B.maxY) / 2 };
+let curFloor = '2F';
+try { curFloor = localStorage.getItem('agentoffice.floor') === '1F' ? '1F' : '2F'; } catch {}
+let B, WC;
+function setBounds() {
+  const F = FLOORS[curFloor];
+  B = { minX: iso(0, F.H)[0], maxX: iso(F.W, 0)[0], minY: -WALLH - 30, maxY: iso(F.W, F.H)[1] + 26 };
+  WC = { x: (B.minX + B.maxX) / 2, y: (B.minY + B.maxY) / 2 };
+}
+setBounds();
 const cam = { zoom: 1, px: 0, py: 0 }, camGoal = { zoom: 1, px: 0, py: 0, on: false };
 let view = { s: 1, ox: 0, oy: 0, base: 1 };
+
+// 층 바꾸기 (안 보는 층도 계속 돌아간다)
+function setFloor(id) {
+  if (id === curFloor) return;
+  curFloor = id;
+  try { localStorage.setItem('agentoffice.floor', id); } catch {}
+  setBounds();
+  Object.assign(cam, { zoom: 1, px: 0, py: 0 }); camGoal.on = false;
+  cv.classList.remove('fadein'); void cv.offsetWidth; cv.classList.add('fadein');
+  renderBuilding();
+}
 
 function computeView() {
   const cw = cv.clientWidth, ch = cv.clientHeight;
@@ -33,6 +51,8 @@ function zoomAt(mx, my, factor) {
 }
 function resetCam() { Object.assign(camGoal, { zoom: 1, px: 0, py: 0, on: true }); }
 function focusActor(a) {
+  setFloor(a.F.id);
+  computeView();
   const z = Math.max(cam.zoom, 1.8), s = view.base * z;
   const [wx, wy] = iso(a.x, a.y, 30);
   Object.assign(camGoal, { zoom: z, px: (WC.x - wx) * s, py: (WC.y - wy) * s - 10, on: true });
@@ -58,7 +78,7 @@ function simulate() {
   let left = elapsed;
   while (left > 0) { const dt = Math.min(0.05, left); left -= dt; for (const a of [...actors.values()]) a.update(dt, wall); }
   tickDirector(wall);
-  elevator.open += ((pt < elevator.until ? 1 : 0) - elevator.open) * Math.min(1, elapsed * 6);
+  for (const F of Object.values(FLOORS)) F.elev.open += ((pt < F.elev.until ? 1 : 0) - F.elev.open) * Math.min(1, elapsed * 6);
   if (camGoal.on) {
     const k = Math.min(1, elapsed * 6);
     cam.zoom += (camGoal.zoom - cam.zoom) * k; cam.px += (camGoal.px - cam.px) * k; cam.py += (camGoal.py - cam.py) * k;
@@ -81,19 +101,26 @@ function frame(pt) {
   ctx.clearRect(0, 0, cw, ch);
   ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.ox, dpr * view.oy);
 
-  const active = new Set(), busy = new Set();
-  for (const a of actors.values()) {
+  const F = FLOORS[curFloor];
+  const here = [...actors.values()].filter((a) => a.F === F);
+  const active = new Set(), busy = new Set(), machine = new Map();
+  for (const a of here) {
+    if (a.kind === 'bot' && a.spot) machine.set(a.spot.fx + ',' + a.spot.fy, a.walking() && a.job.status === 'run' ? 'idle' : a.job.status);
     if (a.walking()) continue;
-    const working = a.tools.size || a.thinkSince;
-    if (working && a.kind !== 'me') active.add(roomAt(...a.cell()));
+    const working = a.tools.size || a.thinkSince || (a.job && a.job.status === 'run');
+    if (working && a.kind !== 'me') active.add(F.roomAt(...a.cell()));
     if (a.spot && (a.tools.size || wall < a.typingUntil)) busy.add(a.spot.fx + ',' + a.spot.fy);
   }
-  for (const o of FURN) o.busy = busy.has(o.x + ',' + o.y) || (o.t === 'rack' && active.has('server')) || (o.t === 'kiosk' && active.has('search'));
+  for (const o of F.FURN) {
+    o.busy = busy.has(o.x + ',' + o.y) || (o.t === 'rack' && active.has('server')) || (o.t === 'kiosk' && active.has('search'));
+    if (o.t === 'machine') o.state = machine.get(o.x + ',' + o.y) || 'idle';
+  }
+  boardState.jobs = boardJobs(wall);
 
-  drawFloor(t, active);
-  drawBackWalls(t, active);
-  const items = staticItems().slice();
-  for (const a of actors.values()) items.push({ k: a.x + a.y + 0.03, draw: () => drawActor(a, t, wall) });
+  F.drawFloor(t, active);
+  F.drawBackWalls(t, active);
+  const items = F.items.slice();
+  for (const a of here) items.push({ k: a.x + a.y + 0.03, draw: () => drawActor(a, t, wall) });
   items.sort((p, q) => p.k - q.k);
   for (const it of items) it.draw(t);
 
@@ -109,7 +136,8 @@ function layoutOverlay(now) {
     return { a, sx: view.ox + wx * view.s, sy: view.oy + wy * view.s };
   }).sort((p, q) => q.sy - p.sy);
   for (const { a, sx, sy } of list) {
-    const tagY = sy - (a.kind === 'claude' ? 14 : 2) * view.s;
+    if (a.F.id !== curFloor) { a.tag.style.opacity = 0; a.el.style.opacity = 0; continue; }
+    const tagY = sy - (a.kind === 'claude' ? 14 : a.kind === 'bot' ? 6 : 2) * view.s;
     a.tag.style.transform = `translate(${sx.toFixed(1)}px, ${tagY.toFixed(1)}px) translate(-50%,-100%)`;
     a.tag.style.opacity = a.alpha;
     const bb = bubbleFor(a, now);
@@ -135,19 +163,22 @@ function layoutOverlay(now) {
 const people = $('people');
 function renderPeople() {
   const now = Date.now();
-  const list = [...actors.values()].filter((a) => a.kind !== 'me');
+  // 2층 사람들 먼저, 그다음 1층 (백그라운드)
+  const list = [...actors.values()].filter((a) => a.kind !== 'me').sort((p, q) => (p.F.id === q.F.id ? 0 : p.F.id === '2F' ? -1 : 1));
   $('peopleCount').textContent = `${list.length}명 근무 중`;
   const html = list.map((a) => {
     const [st, cls] = statusOf(a, now);
     const bb = bubbleFor(a, now);
+    const bot = a.kind === 'bot';
     const title = a.kind === 'claude' ? 'Claude' : (a.desc || typeKo(a.kind));
-    const sub = a.kind === 'claude' ? 'Claude' : typeKo(a.kind);
-    const av = a.kind === 'claude' ? '✳' : typeKo(a.kind).slice(0, 1);
+    const sub = a.kind === 'claude' ? '팀장' : (a.background ? '백그라운드 ' : '') + typeKo(a.kind);
+    const av = a.kind === 'claude' ? '✳' : bot ? '🤖' : typeKo(a.kind).slice(0, 1);
+    const stat = bot ? `셸 작업 · ${fmtSec((a.job.end || now) - a.job.since)}` : `도구 ${a.toolCount}회 · ${fmtSec(now - a.lastTs)}`;
     return `<div class="person" data-id="${esc(a.id)}">
-      <div class="av" style="background:${a.st.dot}">${esc(av)}</div>
-      <div class="pm"><div class="pt"><b title="${esc(title)}">${esc(title)}</b><span class="ty">${esc(sub)}</span><span class="pill ${cls}">${st}</span></div>
+      <div class="av ${bot ? 'bot' : ''}" style="background:${a.st.dot}">${esc(av)}</div>
+      <div class="pm"><div class="pt"><span class="fchip f${a.F.id}">${a.F.id}</span><b title="${esc(title)}">${esc(title)}</b><span class="ty">${esc(sub)}</span><span class="pill ${cls}">${st}</span></div>
       <div class="pa">${esc(bb ? bb.plain : '—')}</div>
-      <div class="ps">도구 ${a.toolCount}회 · ${fmtSec(now - a.lastTs)}</div></div></div>`;
+      <div class="ps">${stat}</div></div></div>`;
   }).join('');
   if (people._html !== html) { people.innerHTML = html; people._html = html; }
 }
@@ -156,9 +187,10 @@ setInterval(renderPeople, 400);
 
 const log = $('log');
 let userName = '나';
-const ICON = { user_say: '👤', interrupt: '✋', say: '💬', think: '💭', answer: '💬', agent_spawn: '🛗', agent_done: '👋', error: '⚠️', turn_end: '✅' };
+const ICON = { user_say: '📢', interrupt: '✋', say: '💬', think: '💭', answer: '💬', agent_spawn: '🛗', agent_done: '👋', error: '⚠️', turn_end: '✅', bg_start: '🤖', bg_end: '🏁' };
 function whoOf(ev) {
   if (ev.actor === 'user' || ev.kind === 'interrupt' || ev.kind === 'answer') return userName;
+  if (ev.kind === 'bg_start' || ev.kind === 'bg_end') return '1F 작업봇';
   if (ev.actor === 'main') return 'Claude';
   const a = actors.get(ev.actor);
   return (a && (a.desc || typeKo(a.kind))) || (ev.kind === 'agent_spawn' && ev.text) || typeKo(ev.agentType);
@@ -173,7 +205,9 @@ function addLog(ev, who) {
     case 'tool_start': case 'question': txt = ev.label; break;
     case 'tool_end': if (!ev.ok) { txt = `❌ ${ev.tool || ''} 실패 ${ev.text || ''}`; cls = 'err'; } break;
     case 'answer': txt = `답변: ${ev.text}`; break;
-    case 'agent_spawn': txt = `${typeKo(ev.agentType)} 출근 — ${ev.text || ''}`; break;
+    case 'agent_spawn': txt = `${ev.background ? '1F 백그라운드 ' : ''}${typeKo(ev.agentType)} 출근 — ${ev.text || ''}`; break;
+    case 'bg_start': if (ev.bgKind === 'shell') txt = `백그라운드 작업 시작 — ${ev.label}`; break;
+    case 'bg_end': txt = `${{ completed: '✅ 완료', failed: '❌ 실패' }[ev.status] || '⏹ ' + ev.status} — ${ev.summary || ''}`; cls = ev.status === 'failed' ? 'err' : ''; break;
     case 'agent_done': txt = `퇴근 — ${ev.text || ''}`; break;
     case 'error': txt = ev.text; cls = 'err'; break;
     case 'turn_end': if (ev.actor === 'main') txt = '턴 끝'; break;
@@ -189,7 +223,7 @@ function addLog(ev, who) {
 }
 
 // ======================================================================
-// 층별 안내 · 세션 선택 · 연결
+// 프로젝트 목록 · 세션 선택 · 연결
 // ======================================================================
 const FLOOR_COLORS = [['#fde2e4', '#d6455d'], ['#fde8cf', '#e07a1f'], ['#e2f0d9', '#4a8f3a'], ['#dfe8fb', '#3c64c8'], ['#ece1fb', '#7d4fc9'], ['#d8f1ef', '#2c8f86']];
 let floors = [], showAllFloors = false, current = null, es = null, info = {};
@@ -200,7 +234,32 @@ const ACTIVE_MS = 90 * 1000;
 function ago(ms) { const s = (Date.now() - ms) / 1000; return s < 60 ? '방금' : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; }
 const hashStr = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 
-function floorNumbering(list) { const n = list.length; return new Map(list.map((f, i) => [f.key, n - i])); }
+// ======================================================================
+// 건물 층: 위쪽 탭 + 오른쪽 아래 미니 단면도
+// ======================================================================
+function floorStats(id, now) {
+  const list = [...actors.values()].filter((a) => a.F.id === id && a.kind !== 'me');
+  const busy = list.filter((a) => a.tools.size || a.thinkSince || (a.job && a.job.status === 'run')).length;
+  const bots = list.filter((a) => a.kind === 'bot' && a.job.status === 'run').length;
+  const people = list.filter((a) => a.kind !== 'bot').length;
+  void now;
+  return { busy, bots, people };
+}
+function renderBuilding() {
+  const now = Date.now(), s2 = floorStats('2F', now), s1 = floorStats('1F', now);
+  const desc = { '2F': `👥 ${s2.people}명`, '1F': `🤖 ${s1.bots} · 👥 ${s1.people}` };
+  const busy = { '2F': s2.busy, '1F': s1.busy };
+  for (const el of document.querySelectorAll('[data-goto]')) {
+    const id = el.dataset.goto;
+    el.classList.toggle('on', id === curFloor);
+    el.classList.toggle('busy', busy[id] > 0);
+    const c = el.querySelector('.cnt'); if (c) c.textContent = desc[id];
+  }
+}
+document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) setFloor(g.dataset.goto); });
+setInterval(renderBuilding, 400);
+
+function floorNumbering(list) { return new Map(list.map((f) => [f.key, (f.name || '?').trim().slice(0, 1).toUpperCase()])); }
 
 function renderFloors() {
   const recent = floors.slice(0, 4);
@@ -223,7 +282,7 @@ function renderFloors() {
         }).join('') + '</div></div>';
     }
     return `<div class="floor ${open ? 'open' : ''}" data-floor="${esc(f.key)}">
-      <div class="fhead2"><span class="fno" style="background:${bg};color:${fg}">${nums.get(f.key)}F</span>
+      <div class="fhead2"><span class="fno" style="background:${bg};color:${fg}">${esc(nums.get(f.key))}</span>
       <div class="fm"><b title="${esc(f.cwd)}">${esc(f.name)}</b><small>세션 ${f.count}개 · ${live ? '지금 활동 중' : ago(f.mtime)}</small></div>
       <span class="fdot ${live ? 'on' : ''}"></span></div>${body}</div>`;
   }).join('');
@@ -234,12 +293,12 @@ function renderFloors() {
     const sl2 = el.querySelector('.slist'); if (sl2) sl2.scrollTop = scroll;
   }
   const rest = floors.length - recent.length;
-  $('moreFloors').textContent = showAllFloors ? '최근 층만 보기' : `오래 쉰 층 ${rest}개 더 보기`;
+  $('moreFloors').textContent = showAllFloors ? '최근 프로젝트만 보기' : `오래 쉰 프로젝트 ${rest}개 더 보기`;
   $('moreFloors').style.display = rest > 0 || showAllFloors ? '' : 'none';
   // 무대 위 카드
   if (cur) {
     const [bg, fg] = FLOOR_COLORS[hashStr(cur.key) % FLOOR_COLORS.length];
-    const fno = $('cardFloor'); fno.textContent = `${nums.get(cur.key) || ''}F`; fno.style.background = fg;
+    const fno = $('cardFloor'); fno.textContent = nums.get(cur.key) || ''; fno.style.background = fg;
     $('cardProject').textContent = cur.name;
     const s = cur.sessions.find((x) => x.session === current);
     if (s && !info.title) $('cardTitle').textContent = s.title;
@@ -308,7 +367,7 @@ function onEvent(ev) {
 }
 
 // ======================================================================
-// 양쪽 패널 접기 (좁은 화면에선 층별 안내가 기본으로 접힘)
+// 양쪽 패널 접기 (좁은 화면에선 프로젝트 목록이 기본으로 접힘)
 // ======================================================================
 const narrow = window.matchMedia('(max-width: 900px)');
 let panels = { floors: true, side: true };
@@ -320,7 +379,7 @@ function applyPanels() {
   b.toggle('no-floors', !narrow.matches && !panels.floors);
   b.toggle('show-floors', narrow.matches && floorsOpenNarrow);
   b.toggle('no-side', !panels.side);
-  $('toggleFloors').textContent = floorsShown ? '◀ 층별 안내' : '▶ 층별 안내';
+  $('toggleFloors').textContent = floorsShown ? '◀ 프로젝트' : '▶ 프로젝트';
   $('toggleSide').textContent = panels.side ? '사람들 · 로그 ▶' : '◀ 사람들 · 로그';
 }
 $('toggleFloors').onclick = () => {
@@ -337,7 +396,8 @@ narrow.addEventListener('change', applyPanels);
 applyPanels();
 
 resetCast(userName);
-window.__office = { actors, cam, focusActor };
+window.__office = { actors, cam, focusActor, setFloor, FLOORS };
+renderBuilding();
 requestAnimationFrame(frame);
 refreshFloors();
 setInterval(refreshFloors, 5000);

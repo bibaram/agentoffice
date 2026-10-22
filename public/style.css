@@ -174,3 +174,50 @@ body.mini .slogo { width: 26px; height: 26px; font-size: 15px; }
 body.mini .live { top: 10px; right: 8px; }
 body.mini .zoom { left: 8px; bottom: 8px; }
 body.mini .bubble { font-size: 10.5px; max-width: 170px; }
+
+/* ---------- 건물 층: 위쪽 탭 ---------- */
+.ftabs { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px;
+  background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(30,40,60,.08); z-index: 2; }
+.ftabs button { position: relative; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px 12px; border-radius: 9px;
+  font-size: 12px; color: #4b5566; white-space: nowrap; }
+.ftabs button b { font-weight: 800; }
+.ftabs button .cnt { color: var(--muted); font-size: 11px; }
+.ftabs button:hover { background: #f4f6f9; }
+.ftabs button.on { background: #2b3342; color: #fff; }
+.ftabs button.on .cnt { color: #c9d1de; }
+.ftabs .ping { display: none; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+.ftabs button.busy:not(.on) .ping { display: block; animation: ping 1.2s infinite; }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); } 100% { box-shadow: 0 0 0 7px rgba(34,197,94,0); } }
+
+/* ---------- 미니 건물 단면도 ---------- */
+.building { position: absolute; right: 16px; bottom: 34px; width: 150px; z-index: 2; filter: drop-shadow(0 3px 10px rgba(30,40,60,.15)); }
+.building .roof { height: 16px; margin: 0 10px; background: #5a6578; clip-path: polygon(8% 100%, 50% 0, 92% 100%); }
+.bfl { position: relative; display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; align-items: center; column-gap: 6px;
+  height: 46px; padding: 0 10px; background: #fbfcfd; border: 2px solid #5a6578; border-top-width: 0; cursor: pointer; overflow: hidden; }
+.bfl:first-of-type { border-top-width: 2px; }
+.bfl b { grid-row: 1 / 3; font-size: 15px; font-weight: 800; color: #5a6578; }
+.bfl span { font-size: 11.5px; font-weight: 700; color: #2b3342; align-self: end; }
+.bfl em { font-style: normal; font-size: 10.5px; color: var(--muted); align-self: start; }
+.bfl .win { position: absolute; right: 8px; top: 50%; width: 22px; height: 14px; margin-top: -7px; border-radius: 3px; background: #d7dde6;
+  box-shadow: -28px 0 0 #d7dde6; }
+.bfl.busy .win { background: #ffd666; box-shadow: -28px 0 0 #ffd666; animation: lights 1.4s ease-in-out infinite; }
+@keyframes lights { 50% { background: #ffb02e; box-shadow: -28px 0 0 #ffe9a3; } }
+.bfl.on { background: #fff4e3; }
+.bfl.on b { color: var(--accent); }
+.bfl.on::before { content: "▶"; position: absolute; left: -16px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 11px; }
+.bfl:hover { background: #f4f6f9; }
+.building .ground { height: 6px; margin: 0 -8px; border-radius: 3px; background: #9aa3b0; }
+
+#cv.fadein { animation: fadein .35s ease-out; }
+@keyframes fadein { from { opacity: .2; transform: translateY(8px); } }
+
+/* ---------- 사람들 목록: 층 표시, 작업봇 ---------- */
+.fchip { flex: none; font-size: 9.5px; font-weight: 800; padding: 0 5px; border-radius: 4px; background: #e9edf3; color: #5a6578; }
+.fchip.f1F { background: #fff1c9; color: #8a6a10; }
+.av.bot { font-size: 15px; }
+.bubble small.mono { font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: #3d4757; background: #f3f5f8; border-radius: 4px; padding: 1px 4px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+body.mini .building { display: none; }
+body.mini .ftabs { top: 8px; padding: 2px; }
+body.mini .ftabs button { padding: 3px 8px; font-size: 11px; }
+body.mini .ftabs .cnt { display: none; }
+@media (max-width: 1200px) { .ftabs { top: 70px; } }

@@ -52,6 +52,19 @@ class FileTail {
 
 const parse = (l) => { try { return JSON.parse(l); } catch { return null; } };
 
+// 파일 끝 4KB에서 마지막으로 보이는 줄 (ANSI 색 코드 제거, 진행바의 CR 줄바꿈 처리)
+function lastLine(file) {
+  try {
+    const size = fs.statSync(file).size;
+    if (!size) return '';
+    const len = Math.min(size, 4096), b = Buffer.alloc(len);
+    const fd = fs.openSync(file, 'r');
+    try { fs.readSync(fd, b, 0, len, size - len); } finally { fs.closeSync(fd); }
+    const lines = b.toString('utf8').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean);
+    return clip(lines[lines.length - 1] || '', 90);
+  } catch { return ''; }
+}
+
 // ---------- 세션 하나를 지켜보는 감시자 (여러 브라우저가 공유) ----------
 class SessionWatch {
   constructor(file) {
@@ -65,6 +78,9 @@ class SessionWatch {
     this.tail = new FileTail(file);
     this.cls = new Classifier('main');
     this.lastSubScan = 0;
+    this.bgAgentTools = new Set(); // 백그라운드로 띄운 서브에이전트의 toolUseId
+    this.bgJobs = new Map();       // 백그라운드 셸 작업: toolId → { file, taskId, last }
+    this.lastBgRead = 0;
     this.boot();
     this.timer = setInterval(() => this.tick(), POLL_MS);
   }
@@ -74,6 +90,7 @@ class SessionWatch {
     for (const l of this.tail.readTail(TAIL_BYTES)) this.onMain(parse(l), true);
     this.scanSubagents(true);
     this.title = this.cls.title;
+    this.readBgOutputs(true);
   }
 
   push(e, replay) {
@@ -92,11 +109,34 @@ class SessionWatch {
     if (!rec) return;
     if (rec.cwd) this.cwd = rec.cwd;
     for (const e of this.cls.classify(rec)) {
+      this.trackBg(e);
       this.push(e, replay);
       // 메인이 받은 tool_result가 서브에이전트 호출 결과면 → 그 에이전트 퇴근 앞당김
       if (e.kind === 'tool_end') {
         for (const a of this.agents.values()) if (a.meta && a.meta.toolUseId === e.toolId) a.parentDone = Date.now();
       }
+    }
+  }
+
+  trackBg(e) {
+    if (e.kind === 'bg_start') {
+      if (e.bgKind === 'agent') this.bgAgentTools.add(e.toolId);
+      else this.bgJobs.set(e.toolId, { file: '', taskId: '', last: '', ts: e.ts });
+    } else if (e.kind === 'bg_info') {
+      const j = this.bgJobs.get(e.toolId);
+      if (j) { j.file = e.outputFile; j.taskId = e.taskId; }
+    } else if (e.kind === 'bg_end') {
+      for (const [id, j] of this.bgJobs) if (id === e.toolId || (e.taskId && j.taskId === e.taskId)) this.bgJobs.delete(id);
+      for (const a of this.agents.values()) if (a.meta && (a.meta.toolUseId === e.toolId || a.id === e.taskId)) a.parentDone = Date.now();
+    }
+  }
+
+  // 돌고 있는 백그라운드 작업의 출력 파일에서 마지막 줄을 읽어 작업봇 말풍선으로 보낸다
+  readBgOutputs(replay) {
+    for (const [toolId, j] of this.bgJobs) {
+      if (!j.file || Date.now() - j.ts > 12 * 3600000) continue;
+      const line = lastLine(j.file);
+      if (line && line !== j.last) { j.last = line; this.push({ actor: 'main', ts: Date.now(), kind: 'bg_progress', toolId, line }, replay); }
     }
   }
 
@@ -134,7 +174,8 @@ class SessionWatch {
       if (!this.readMeta(a) && now - a.seenAt < 1500) return; // meta.json 조금 기다려 줌
       a.spawned = true;
       const m = a.meta || {};
-      this.push({ actor: a.actor, ts: now, kind: 'agent_spawn', agentType: m.agentType || 'general-purpose', text: clip(m.description || '', 60) }, a.replayBoot);
+      const background = !!(m.toolUseId && this.bgAgentTools.has(m.toolUseId));
+      this.push({ actor: a.actor, ts: now, kind: 'agent_spawn', agentType: m.agentType || 'general-purpose', text: clip(m.description || '', 60), background }, a.replayBoot);
       if (a.replayBoot) {
         for (const l of a.tail.readTail(TAIL_BYTES)) this.onAgentLine(a, parse(l), true, now);
         a.replayBoot = false;
@@ -168,6 +209,7 @@ class SessionWatch {
     if (this.cls.title && this.cls.title !== this.title) this.title = this.cls.title;
     if (now - this.lastSubScan > 500) { this.lastSubScan = now; this.scanSubagents(false); }
     for (const a of this.agents.values()) this.tickAgent(a, now);
+    if (this.bgJobs.size && now - this.lastBgRead > 1000) { this.lastBgRead = now; this.readBgOutputs(false); }
   }
 
   addClient(res) {

@@ -1,6 +1,6 @@
 {
   "name": "agentoffice",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Claude Code 세션 파일을 대본 삼아 아이소메트릭 사무실에서 캐릭터가 연기하는 뷰어 (토큰 0)",
   "main": "electron/main.js",
   "scripts": {
